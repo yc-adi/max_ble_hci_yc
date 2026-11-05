@@ -59,6 +59,7 @@ import argparse
 import logging
 import os
 import signal
+import time
 import secrets
 
 # pylint: disable=unused-import,too-many-lines
@@ -212,6 +213,13 @@ def _init_cli():
     )
 
     parser.add_argument(
+        "--stop-bits",
+        type=int,
+        default=1,
+        help="Number of stop bits. Default: 1",
+    )
+
+    parser.add_argument(
         "-i",
         "--id-tag",
         dest="idtag",
@@ -274,6 +282,7 @@ def main():
         async_callback=print,
         evt_callback=print,
         flowcontrol=args.enable_flow_control,
+        stopbits=args.stop_bits,
         recover_on_power_loss=True,
     )
 
@@ -288,7 +297,11 @@ def main():
 
     print("Bluetooth Low Energy HCI tool")
     print(f"Serial port: {args.serial_port}")
-    print(f"8N1 {args.baudRate}")
+    print(
+        f"8N{args.stop_bits} {args.baudRate}, "
+        f"flow control {'on' if args.enable_flow_control else 'off'}, "
+        f"stop bits {args.stop_bits}"
+    )
 
     commands = args.commands
     if args.startup_script:
@@ -1066,18 +1079,37 @@ Default: {hex(DEFAULT_CE_LEN)}""",
         action="store_true",
         help="Infinite test, constant TX without packets: Default: False",
     )
-    tx_test_bt_vs_parser.set_defaults(
-        func=lambda args: print(
-            hci.tx_test_bt_vs(
-                channel=args.channel,
-                packet_len=args.packet_length,
-                payload=args.payload,
-                packet_type=args.packet_type,
-                tx_power=args.tx_power,
-                inf_test=args.inf_test,
-            )
-        )
+    tx_test_bt_vs_parser.add_argument(
+        "-s",
+        "--seconds",
+        dest="seconds",
+        type=float,
+        default=0,
+        help="""Run the test for this many seconds, then automatically
+        end it (same as endbtvs). 0 runs until endbtvs is sent. Default: 0""",
     )
+
+    def _tx_test_bt_vs(args):
+        if args.seconds < 0:
+            print("--seconds must be 0 or greater")
+            return
+        status = hci.tx_test_bt_vs(
+            channel=args.channel,
+            packet_len=args.packet_length,
+            payload=args.payload,
+            packet_type=args.packet_type,
+            tx_power=args.tx_power,
+            inf_test=args.inf_test,
+        )
+        print(status)
+        if args.seconds > 0 and status == StatusCode.SUCCESS:
+            try:
+                print(f"Running TX test for {args.seconds} s...")
+                time.sleep(args.seconds)
+            finally:
+                print(hci.test_end_bt_vs())
+
+    tx_test_bt_vs_parser.set_defaults(func=_tx_test_bt_vs)
 
     #### RXTESTBTVS PARSER ####
     rx_test_bt_vs_parser = subparsers.add_parser(
